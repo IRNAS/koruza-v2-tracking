@@ -1,68 +1,42 @@
 import time
 import logging
-import numpy as np
-from enum import Enum
-# import matplotlib.pyplot as plt
-
-import xmlrpc.client
-from ...src.constants import KORUZA_MAIN_PORT
 
 log = logging.getLogger()
 
 range_x = 14000
 range_y = 14000
+z_min = -40
+z_max = 2
 
 LEFT = {"name": "left", "direction": "-1"}
 RIGHT = {"name": "right", "direction": "1"}
 DOWN = {"name": "down", "direction": "-1"}
 UP = {"name": "up", "direction": "1"}
 
-class Heatmap():
-    def __init__(self):
-        """Heatmap class"""
-        self.heatmap = []
-
-    def add_point(self, pos_x, pos_y, rx_dBm):
-        """Append new point to heatmap array"""
-        point = (pos_x, pos_y, rx_dBm)
-        self.heatmap.append(point)
-
-    def find_max_of_heatmap(self):
-        """Get pos_x and pos_y of heatmap"""
-
-        max_val = -100
-        selected_index = 0
-        for index, point in enumerate(self.heatmap):
-            if point[2] > max_val:
-                selected_index = index
-
-        print(f"Selected index: {selected_index}")
-
-        return self.heatmap[selected_index]  # return selected point
-
-    def clear_heatmap(self):
-        """Clear entire heatmap"""
-        self.heatmap = []
-
+IMG_FOLDER = "/home/pi/koruza_v2/koruza_v2_tracking/images/"
 
 class SpiralScan():
-    def __init__(self):
+    def __init__(self, client, heatmap):
         """Initialize spiral scan class"""
         # initialize rpc client
-        self.client = xmlrpc.client.ServerProxy(f"http://localhost:{KORUZA_MAIN_PORT}", allow_none=True)
+        # self.client = xmlrpc.client.ServerProxy(f"http://localhost:{KORUZA_MAIN_PORT}", allow_none=True)
+
+        self.client = client
 
         self.current_target_x = None
         self.current_target_y = None
 
-        self.heatmap = Heatmap()
+        self.heatmap = heatmap  # heatmap if the user wants data plotted
 
+        self.max_point = None  # max point (x, y, rx_pow)
 
     def next_step(self, direction_enum, step):
         """Move in horizontal/vertical direction"""
 
+        prev_max_rx_dBm = -100
+
         print(f"Moving in direction: {direction_enum}")
         direction = int(direction_enum["direction"])
-
         skip = False
 
         if direction_enum == LEFT or direction_enum == RIGHT:
@@ -101,8 +75,14 @@ class SpiralScan():
                 except Exception as e:
                     log.error(f"Error getting rx_dBm: {e}")
 
+                # update max point
+                if rx_dBm > prev_max_rx_dBm:
+                    self.max_point (pos_x, pos_y, rx_dBm)
+                    prev_max_rx_dBm = rx_power_dBm
+
                 # write rx_dBm to heatmap
                 self.heatmap.add_point(pos_x, pos_y, rx_dBm)
+                print(f"Pos x: {pos_x}, pos y: {pos_y}")
 
                 if prev_pos_x == pos_x:
                     count_not_changed += 1
@@ -117,16 +97,12 @@ class SpiralScan():
                 prev_pos_x = pos_x
                 prev_pos_y = pos_y
 
-
-                if count_not_changed >= 5:  # TODO find good number
-                    print("Break out in count not chagned")
-                    break
-
                 if pos_x > 14000 or pos_x < -14000 or pos_y > 14000 or pos_y < -14000:
-                    
                     continue 
 
-                print(f"Pos x: {pos_x}, pos y: {pos_y}")
+                if count_not_changed >= 30:  # TODO find good number
+                    print("Break out in count not chagned")
+                    break
 
                 if (pos_x == self.current_target_x and self.current_target_y == pos_y) or (pos_x <= -range_x or pos_x >= range_x) or (pos_y <= -range_y or pos_y >= range_y):
                     print("Break out in correct position found")
@@ -138,8 +114,10 @@ class SpiralScan():
             print(f"Step size {step} duration: {end_time - start_time}")
 
 
-    def do_spiral(self, step_limit, step, step_size, start_pos_x=None, start_pos_y=None):
-        """Do spiral until at 12500, 12500"""
+    def do_spiral(self, step_size, start_pos_x=None, start_pos_y=None, stop_after=5, no_max_limit=5, rx_power_limit=-35):
+        """Do spiral until at circle_limit"""
+        step = 0
+        not_found_count = 0
 
         if start_pos_x is not None and start_pos_y is not None:
             self.current_target_x = start_pos_x
@@ -153,47 +131,27 @@ class SpiralScan():
         else:
             self.current_target_x, self.current_target_y = self.client.get_motors_position()
 
-        not_found_count = 0  # 
-        while step <= step_limit:
+        circle_count = 0  # 
+        while circle_count < stop_after:
             step += step_size
             self.next_step(LEFT, step)
             self.next_step(UP, step)
+
             step += step_size
             self.next_step(RIGHT, step)
             self.next_step(DOWN, step)
 
-            pos_x, pos_y, rx_power_dBm = self.heatmap.find_max_of_heatmap()  # find max power after one cycle
+            circle_count += 1
+            pos_x, pos_y, rx_power_dBm = self.max_point
 
-            if rx_power_dBm < -35:
+            if rx_power_dBm < rx_power_limit:
                 not_found_count += 1
             else:
                 not_found_count = 0
 
-            if not_found_count >= 5:  # if not found after 5 cycles break
+            if not_found_count >= no_max_limit:  # if not found after 5 cycles break - TODO is this ok? - should w
                 break
 
-    def align(self):
-        """Align to max power"""
-        self.do_spiral(12500, 0, 1000)  # make spiral of 1000
-
-        pos_x, pos_y, rx_power_dBm = self.heatmap.find_max_of_heatmap()
-        print(f"Found maximum at: {pos_x}, {pos_y}: {rx_power_dBm}")
-
-        self.heatmap.clear_heatmap()  # clear heatmap
-
-        self.do_spiral(2500, 0, 100, pos_x, pos_y)  # do second spiral and move to max pos
-
-        pos_x, pos_y, rx_power_dBm = self.heatmap.find_max_of_heatmap()
-        print(f"Found maximum at: {pos_x}, {pos_y}: {rx_power_dBm}")
-
-        self.client.move_motors_to(pos_x, pos_y)
-
-
-# 0.) manually align cross to second unit camera (auto align later down the road)
-
-# 2.) move in spiral from START_X, START_Y to max, max in step of 1000
-# keep track of all positions and values for heatmap
-# https://numpy.org/doc/stable/reference/routines.array-creation.html#routines-array-creation
-
-spiral = SpiralScan()
-spiral.align()
+    def get_max_position(self):
+        """Return position of maximum power and read power"""
+        return self.max_point
