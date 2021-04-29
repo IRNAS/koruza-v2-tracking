@@ -1,5 +1,9 @@
 import matplotlib.pyplot as plt
 
+IMG_FOLDER = "/home/pi/koruza_v2/koruza_v2_tracking/images/"
+z_min = -40
+z_max = 2
+
 class Heatmap():
     # a move of 1000 is roughly 18 pixels wide and high (round up)  TODO get exact number
     def __init__(self, offset_x, offset_y):
@@ -40,8 +44,8 @@ class Heatmap():
     def save_image(self, filename, size):
         """Generate and save image from heatmap data"""
         fig, ax = plt.subplots()
-        x = [offset_x + motor_x / self.x_ratio for motor_x in self.pos_x]
-        y = [offset_y + motor_y / self.y_ratio for motor_y in self.pos_y]
+        x = [self.offset_x + motor_x / self.x_ratio for motor_x in self.pos_x]
+        y = [self.offset_y + motor_y / self.y_ratio for motor_y in self.pos_y]
         ax.scatter(x, y, c=self.rx_pow, s=1, vmin=z_min, vmax=z_max)    
         # ax.grid(True)
         fig.tight_layout()
@@ -52,6 +56,6 @@ class Heatmap():
     def save_heatmap_data(self, filename):
         """Save array to text file"""
         with open(IMG_FOLDER + filename, "w") as file:
-            file.write(f"offset_x: {offset_x}, offset_y: {offset_y}\n")
+            file.write(f"offset_x: {self.offset_x}, offset_y: {self.offset_y}\n")
             for point in zip(self.pos_x, self.pos_y, self.rx_pow):
                 file.write(f"{point[0]}, {point[1]}, {point[2]}\n")
