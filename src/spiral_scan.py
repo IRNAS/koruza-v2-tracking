@@ -40,7 +40,6 @@ class SpiralScan():
         else:
             self.start_pos_x, self.start_pos_y = self.client.get_motors_position()
         
-
         self.max_point = {"x": self.start_pos_x, "y": self.start_pos_y, "dBm": -40}  # max point (x, y, rx_pow)
         self.prev_max_point = {"x": self.start_pos_x, "y": self.start_pos_y, "dBm": -40}
         
@@ -89,14 +88,14 @@ class SpiralScan():
             # wait for motors to move
             for _ in range(0, 1000):  # wait for motors to move to position - TODO find actual time range
                 # TODO implement stuck check
-                print(f"Current target x: {self.current_target_x}, {self.current_target_y}")
+                # print(f"Current target x: {self.current_target_x}, {self.current_target_y}")
                 try:
                     if self.remote:
                         pos_x, pos_y = self.client.issue_remote_command("get_motors_position", ())
                     else:
                         pos_x, pos_y = self.client.get_motors_position()
 
-                    print(f"Read pos x: {pos_x}, pos y: {pos_y}")
+                    # print(f"Read pos x: {pos_x}, pos y: {pos_y}")
                 except Exception as e:
                     log.error(f"An error occured when unpacking motor position values: {e}")
                     
