@@ -1,3 +1,4 @@
+
 import time
 import logging
 
@@ -13,7 +14,7 @@ UP = {"name": "up", "direction": "1"}
 
 IMG_FOLDER = "/home/pi/koruza_v2/koruza_v2_tracking/images/"
 
-class SpiralScan():
+class CrossScan():
     def __init__(self, client, start_pos_x=None, start_pos_y=None, remote=None, lock=None):
         """Initialize spiral scan class"""
         # initialize rpc client
@@ -30,7 +31,25 @@ class SpiralScan():
         self.start_pos_x = start_pos_x
         self.start_pos_y = start_pos_y
 
-    def next_step(self, direction_enum, step):
+    def scan_window(self, max_offset, vertical_step):
+        """Scan window with scanlines moving from top to bottom"""
+
+        vertical_offset = max_offset
+
+        self.move_to_position(-max_offset, vertical_offset)  # upper left corner
+
+        # do until bottom corner is reached
+        while self.current_target_y >= -max_offset:
+
+            # move down and rigth
+            self.move_to_position(max_offset, vertical_offset)
+            vertical_offset -= vertical_step
+
+            # move down and left
+            self.move_to_position(-max_offset, vertical_offset)
+            vertical_offset -= vertical_step
+
+    def move(self, direction_enum, step):
         """Move in horizontal/vertical direction"""
 
         # get current position
@@ -121,42 +140,19 @@ class SpiralScan():
 
             print(f"Step size {step} duration: {end_time - start_time}")
 
-    def do_inward_spiral(self):
-        """Do inward spiral from 12500,12500 to 0,0"""
-        steps = range(24000, 0, -1000)
-        # steps = [24000, 22000, 20000, 18000, 16000, 14000, 12000, 10000, 8000, 6000, 4000, 2000, 1000, 500, 250, 100]
-        step_index = 0
-
-        while True:
-            step = steps[step_index]
-            self.next_step(RIGHT, step)
-            self.next_step(DOWN, step)
-            step_index += 1
-            if step_index >= len(steps):
-                break  # stop loop if past last index
-
-            step = steps[step_index]
-            self.next_step(LEFT, step)
-            self.next_step(UP, step)
-            step_index += 1
-            if step_index >= len(steps):
-                break  # stop loop if past last index
-
-    def do_spiral(self, step_size, stop_after=5, no_max_limit=5, rx_power_limit=-35):
+    def do_cross(self, step_size):
         """Do spiral until at circle_limit"""
-        step = 0
-        circle_count = 0  #
+        self.move(LEFT, step_size)
+        self.move(RIGHT, 2 * step_size)  # move back and right
+        self.move(LEFT, step_size)  # move back to start position
 
-        while circle_count < stop_after:
-            step += step_size
-            self.next_step(LEFT, step)
-            self.next_step(UP, step)
+        self.move(DOWN, step_size)
+        self.move(UP, 2 * step_size)
+        self.move(DOWN, step_size)  # move back to start position
 
-            step += step_size
-            self.next_step(RIGHT, step)
-            self.next_step(DOWN, step)
-
-            circle_count += 1
+    def get_max_position(self):
+        """Return position of maximum power and read power"""
+        return self.max_point
 
     def move_to_position(self, pos_x, pos_y):
         """Move motor to selected position"""

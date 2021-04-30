@@ -46,7 +46,7 @@ class Heatmap():
         fig, ax = plt.subplots()
         x = [self.offset_x + motor_x / self.x_ratio for motor_x in self.pos_x]
         y = [self.offset_y + motor_y / self.y_ratio for motor_y in self.pos_y]
-        ax.scatter(x, y, c=self.rx_pow, s=1, vmin=z_min, vmax=z_max)    
+        ax.scatter(x, y, c=self.rx_pow[:len(x)], s=1, vmin=z_min, vmax=z_max)    
         # ax.grid(True)
         fig.tight_layout()
         plt.xlim([0, 720])
