@@ -3,14 +3,10 @@ import time
 import logging
 from threading import Thread, Lock
 
+from ..src.align import Align, Unit, Strategy
 from ..src.heatmap import Heatmap
-from ..src.spiral_scan import SpiralScan
 
-from ...src.constants import KORUZA_MAIN_PORT, DEVICE_MANAGEMENT_PORT
-
-# NOTE THIS FUNCTIONS REALLY POORLY
-
-# TODO read from file
+# TODO read offset positions from file
 offset_x_master = 282
 offset_y_master = 528
 
@@ -22,84 +18,145 @@ heatmap_secondary = Heatmap(offset_x_slave, offset_y_slave)
 
 log = logging.getLogger()
 
-class SpiralAlign():
+class Direction():
+    LEFT = {"name": "left", "dir": -1}
+    RIGHT = {"name": "right", "dir": 1}
+    DOWN = {"name": "down", "dir": -1}
+    UP = {"name": "up", "dir": 1}
+
+
+class SpiralAlign(Align):
     def __init__(self, heatmap_primary, heatmap_secondary):
         """Init algorithm variables"""
+        super().__init__()
 
         self.heatmap_primary = heatmap_primary
         self.heatmap_secondary = heatmap_secondary
 
-        # keep track of maximum values in each iteration
-        # one iteration is one spiral of either primary or secondary unit
-        self.max_point_primary = {"x": 0, "y": 0, "dBm": -40}
-
-        self.max_point_secondary = {"x": 0, "y": 0, "dBm": -40}
-
-        self.client = xmlrpc.client.ServerProxy(f"http://localhost:{KORUZA_MAIN_PORT}", allow_none=True)  # client to koruza
-        time.sleep(2)  # wait for client to init
-
-        self.current_pos_x_primary = None
-        self.current_pos_y_primary = None
-
-        self.current_pos_x_secondary = None
-        self.current_pos_y_secondary = None
-
-        self.lock = Lock()
-
-        self.spiral_scan_primary = SpiralScan(self.client, 0, 0, remote=False, lock=self.lock)
-        self.spiral_scan_secondary = SpiralScan(self.client, 0, 0, remote=True, lock=self.lock)
-
-        self.running = True
-
-        self.monitor_thread = Thread(target=self.get_unit_diagnostics, daemon=True)
-        self.monitor_thread.start()
+        self.current_target = {
+            "primary": {
+                "x": 0,
+                "y": 0
+            },
+            "secondary": {
+                "x": 0,
+                "y": 0
+            }
+        }
+        self.set_max_point_strategy(Strategy.LOCAL_MAX)
+        self.start_monitoring()
 
     def __del__(self):
         """Destructor"""
-        self.running = False
-        self.monitor_thread.join()
+        pass
 
-    def move_to_max_position_primary(self):
-        """Move to currently saved max position"""
-        self.spiral_scan_primary.move_to_position(self.max_point_primary["x"], self.max_point_primary["y"])
+    def next_step(self, unit, direction_enum, step):
+        """Move in horizontal/vertical direction"""
 
-    def move_to_max_position_secondary(self):
-        """Move to currently saved max position"""
-        self.spiral_scan_primary.move_to_position(self.max_point_secondary["x"], self.max_point_secondary["y"])
+        print(f"Moving in direction: {direction_enum} on {unit}")
+        skip = False
 
-    def get_unit_diagnostics(self):
-        """Get both unit diagnostics in a short interval"""
+        direction = direction_enum["dir"]
 
-        while self.running:
-            self.lock.acquire()
+        if direction_enum == Direction.LEFT or direction_enum == Direction.RIGHT:
+            self.current_target[unit]["x"] += direction * step
 
-            try:
-                pos_x_secondary, pos_y_secondary = self.client.issue_remote_command("get_motors_position", ())
-                rx_dBm_secondary = self.client.issue_remote_command("get_sfp_diagnostics", ())["sfp_0"]["diagnostics"]["rx_power_dBm"]
+        if direction_enum == Direction.UP or direction_enum == Direction.DOWN:
+            self.current_target[unit]["y"] += direction * step
 
-                pos_x_primary, pos_y_primary = self.client.get_motors_position()
-                rx_dBm_primary = self.client.get_sfp_diagnostics()["sfp_0"]["diagnostics"]["rx_power_dBm"]
+        if self.current_target[unit]["x"] > 12500 or self.current_target[unit]["x"] < -12500:
+            skip = True
+            self.current_target[unit]["x"] -= direction * step
+        
+        if self.current_target[unit]["y"] > 12500 or self.current_target[unit]["y"] < -12500:
+            skip = True
+            self.current_target[unit]["y"] -= direction * step
 
-                if rx_dBm_secondary > self.max_point_secondary["dBm"] or rx_dBm_primary > self.max_point_primary["dBm"]:
+        if not skip:
+            self.move_to_position(unit, self.current_target[unit]["x"], self.current_target[unit]["y"])
 
-                    # update max points if total dBm is higher than previously
-                    if rx_dBm_primary + rx_dBm_secondary > self.max_point_primary["dBm"] + self.max_point_secondary["dBm"]:
-                        self.max_point_secondary = {"x": pos_x_secondary, "y": pos_x_secondary, "dBm": rx_dBm_secondary}
-                        print(f"New max point on secondary unit: {self.max_point_secondary}")
+    def do_inward_spiral(self, unit):
+        """Do inward spiral from 12500,12500 to 0,0"""
+        steps = range(24000, 0, -1000)
+        # steps = [24000, 22000, 20000, 18000, 16000, 14000, 12000, 10000, 8000, 6000, 4000, 2000, 1000, 500, 250, 100]
+        step_index = 0
 
-                        # update both max points! - since max depends on both positions, not only one
-                        self.max_point_primary = {"x": pos_x_primary, "y": pos_y_primary, "dBm": rx_dBm_primary}
-                        print(f"New max point on primary unit: {self.max_point_primary}")
+        while True:
+            step = steps[step_index]
+            self.next_step(unit, Direction.RIGHT, step)
+            self.next_step(unit, Direction.DOWN, step)
+            step_index += 1
+            if step_index >= len(steps):
+                break  # stop loop if past last index
 
-                self.heatmap_primary.add_point(pos_x_primary, pos_y_primary, rx_dBm_primary)
-                self.heatmap_secondary.add_point(pos_x_secondary, pos_y_secondary, rx_dBm_secondary)
-                
-            except Exception as e:
-                log.error(f"Error getting rx_dBm: {e}")
+            step = steps[step_index]
+            self.next_step(unit, Direction.LEFT, step)
+            self.next_step(unit, Direction.UP, step)
+            step_index += 1
+            if step_index >= len(steps):
+                break  # stop loop if past last index
 
-            self.lock.release()
+    def do_spiral(self, unit, step_size, stop_after=5, no_max_limit=5, rx_power_limit=-35):
+        """Do spiral until at circle_limit"""
+        step = 0
+        circle_count = 0  #
 
-            time.sleep(0.2)
+        while circle_count < stop_after:
+            step += step_size
+            self.next_step(unit, Direction.LEFT, step)
+            self.next_step(unit, Direction.UP, step)
+
+            step += step_size
+            self.next_step(unit, Direction.RIGHT, step)
+            self.next_step(unit, Direction.DOWN, step)
+
+            circle_count += 1
+
+
+    def align_alternatingly(self):
+        """Align to each units max power"""
+
+        # 1. Start by homing
+        self.move_to_position(Unit.PRIMARY, 0, 0)
+        self.move_to_position(Unit.SECONDARY, 0, 0)
+
+        self.heatmap_primary.clear_heatmap()  # clear heatmap
+        self.heatmap_secondary.clear_heatmap()  # clear heatmap
+
+        # move both to max position
+        self.move_to_max(Unit.PRIMARY)
+        self.move_to_max(Unit.SECONDARY)
+
+        # 2. repeat steps until limit is reached or signal strength is satisfactory
+        LOOP_COUNT_LIMIT = 5
+
+        while (self.max["primary"]["dBm"] < -10 and self.max["secondary"]["dBm"] < -10) or loop_count > LOOP_COUNT_LIMIT:
+
+            step_size = 750
+            self.do_spiral(Unit.PRIMARY, step_size, stop_after=5)
+            self.do_spiral(Unit.SECONDARY, step_size, stop_after=5)
+
+            # move both to max position
+            self.move_to_max(Unit.PRIMARY)
+            self.move_to_max(Unit.SECONDARY)
+
+            step_size = 250
+            self.do_spiral(Unit.PRIMARY, step_size, stop_after=7)
+            self.do_spiral(Unit.SECONDARY, step_size, stop_after=7)
+
+            # move both to max position
+            self.move_to_max(Unit.PRIMARY)
+            self.move_to_max(Unit.SECONDARY)
+
+            step_size = 100
+            self.do_spiral(Unit.PRIMARY, step_size, stop_after=10)
+            self.do_spiral(Unit.SECONDARY, step_size, stop_after=10)
+
+            # move both to max position
+            self.move_to_max(Unit.PRIMARY)
+            self.move_to_max(Unit.SECONDARY)
+
+            loop_count += 1
 
 def align_step_async(spiral_align, step_size, stop_after):
     """One iteration of alignment:
@@ -142,12 +199,8 @@ def align_asnyc():
     spiral_align = SpiralAlign(heatmap_primary, heatmap_secondary)
 
     # 1. Start by homing
-    spiral_align.lock.acquire()
-    spiral_align.client.home()
-    spiral_align.lock.release()
-    spiral_align.lock.acquire()
-    spiral_align.client.issue_remote_command("home", ())
-    spiral_align.lock.release()
+    spiral_align.spiral_scan_primary.move_to_position(0, 0)
+    spiral_align.spiral_scan_secondary.move_to_position(0, 0)
 
     spiral_align.heatmap_primary.clear_heatmap()  # clear heatmap
     spiral_align.heatmap_secondary.clear_heatmap()  # clear heatmap
@@ -186,8 +239,8 @@ def align_primary_secondary():
     time.sleep(30)
 
     # move both to max position
-    spiral_align.spiral_scan_primary.move_to_position(spiral_align.max_point_primary["x"], spiral_align.max_point_primary["y"])
-    spiral_align.spiral_scan_secondary.move_to_position(spiral_align.max_point_secondary["x"], spiral_align.max_point_secondary["y"])
+    spiral_align.move_to_max(Unit.PRIMARY)
+    spiral_align.move_to_max(Unit.SECONDARY)
 
     # align primary unit
     step_size = 750
@@ -226,80 +279,10 @@ def align_primary_secondary():
     spiral_align.spiral_scan_secondary.move_to_position(spiral_align.max_point_secondary["x"], spiral_align.max_point_secondary["y"])
 
 
-def align_alternatingly():
-    """Align to each units max power"""
-    spiral_align = SpiralAlign(heatmap_primary, heatmap_secondary)
 
-    # 1. Start by homing
-    spiral_align.lock.acquire()
-    spiral_align.client.home()
-    spiral_align.lock.release()
-    spiral_align.lock.acquire()
-    spiral_align.client.issue_remote_command("home", ())
-    spiral_align.lock.release()
-
-    spiral_align.heatmap_primary.clear_heatmap()  # clear heatmap
-    spiral_align.heatmap_secondary.clear_heatmap()  # clear heatmap
-
-    time.sleep(30)
-
-    # move both to max position
-    spiral_align.spiral_scan_primary.move_to_position(spiral_align.max_point_primary["x"], spiral_align.max_point_primary["y"])
-    spiral_align.spiral_scan_secondary.move_to_position(spiral_align.max_point_secondary["x"], spiral_align.max_point_secondary["y"])
-
-    step_size = 750
-    align_step_primary(spiral_align, step_size, stop_after=7)
-    align_step_secondary(spiral_align, step_size, stop_after=7)
-
-    # move both to max position
-    spiral_align.spiral_scan_primary.move_to_position(spiral_align.max_point_primary["x"], spiral_align.max_point_primary["y"])
-    spiral_align.spiral_scan_secondary.move_to_position(spiral_align.max_point_secondary["x"], spiral_align.max_point_secondary["y"])
-
-
-    step_size = 500
-    align_step_primary(spiral_align, step_size, stop_after=10)
-    align_step_secondary(spiral_align, step_size, stop_after=10)
-
-    # move both to max position
-    spiral_align.spiral_scan_primary.move_to_position(spiral_align.max_point_primary["x"], spiral_align.max_point_primary["y"])
-    spiral_align.spiral_scan_secondary.move_to_position(spiral_align.max_point_secondary["x"], spiral_align.max_point_secondary["y"])
-
-
-    step_size = 250
-    align_step_primary(spiral_align, step_size, stop_after=10)
-    align_step_secondary(spiral_align, step_size, stop_after=10)
-
-    # move both to max position
-    spiral_align.spiral_scan_primary.move_to_position(spiral_align.max_point_primary["x"], spiral_align.max_point_primary["y"])
-    spiral_align.spiral_scan_secondary.move_to_position(spiral_align.max_point_secondary["x"], spiral_align.max_point_secondary["y"])
-
-
-    step_size = 100
-    align_step_primary(spiral_align, step_size, stop_after=30)
-    align_step_secondary(spiral_align, step_size, stop_after=30)
-
-    # move both to max position
-    spiral_align.spiral_scan_primary.move_to_position(spiral_align.max_point_primary["x"], spiral_align.max_point_primary["y"])
-    spiral_align.spiral_scan_secondary.move_to_position(spiral_align.max_point_secondary["x"], spiral_align.max_point_secondary["y"])
-
-
-    step_size = 100
-    align_step_primary(spiral_align, step_size, stop_after=20)
-    align_step_secondary(spiral_align, step_size, stop_after=20)
-
-    # move both to max position
-    spiral_align.spiral_scan_primary.move_to_position(spiral_align.max_point_primary["x"], spiral_align.max_point_primary["y"])
-    spiral_align.spiral_scan_secondary.move_to_position(spiral_align.max_point_secondary["x"], spiral_align.max_point_secondary["y"])
-
-
-    step_size = 100
-    align_step_primary(spiral_align, step_size, stop_after=10)
-    align_step_secondary(spiral_align, step_size, stop_after=10)
-
-    # move both to max position
-    spiral_align.spiral_scan_primary.move_to_position(spiral_align.max_point_primary["x"], spiral_align.max_point_primary["y"])
-    spiral_align.spiral_scan_secondary.move_to_position(spiral_align.max_point_secondary["x"], spiral_align.max_point_secondary["y"])
+spiral_align = SpiralAlign(heatmap_primary, heatmap_secondary)
+spiral_align.align_alternatingly()
 
 # align_alternatingly()
 # align_asnyc()
-align_primary_secondary()
+# align_primary_secondary()

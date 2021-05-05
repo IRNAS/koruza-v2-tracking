@@ -15,7 +15,7 @@ UP = {"name": "up", "direction": "1"}
 IMG_FOLDER = "/home/pi/koruza_v2/koruza_v2_tracking/images/"
 
 class CrossScan():
-    def __init__(self, client, start_pos_x=None, start_pos_y=None, remote=None, lock=None):
+    def __init__(self, client, remote=None, lock=None):
         """Initialize spiral scan class"""
         # initialize rpc client
         # self.client = xmlrpc.client.ServerProxy(f"http://localhost:{KORUZA_MAIN_PORT}", allow_none=True)
@@ -27,9 +27,6 @@ class CrossScan():
 
         self.current_target_x = None
         self.current_target_y = None
-
-        self.start_pos_x = start_pos_x
-        self.start_pos_y = start_pos_y
 
     def scan_window(self, max_offset, vertical_step):
         """Scan window with scanlines moving from top to bottom"""
@@ -108,6 +105,8 @@ class CrossScan():
                     # print(f"Read pos x: {pos_x}, pos y: {pos_y}")
                 except Exception as e:
                     self.lock.release()
+                    pos_x = 15000  # set outside valid range to skip
+                    pos_y = 15000
                     log.error(f"An error occured when unpacking motor position values: {e}")
 
                 if prev_pos_x == pos_x:
@@ -143,12 +142,18 @@ class CrossScan():
     def do_cross(self, step_size):
         """Do spiral until at circle_limit"""
         self.move(LEFT, step_size)
+        time.sleep(0.5)  # wait for 0.5 seconds for dBm to settle
         self.move(RIGHT, 2 * step_size)  # move back and right
+        time.sleep(0.5)  # wait for 0.5 seconds for dBm to settle
         self.move(LEFT, step_size)  # move back to start position
+        time.sleep(0.5)  # wait for 0.5 seconds for dBm to settle
 
         self.move(DOWN, step_size)
+        time.sleep(0.5)  # wait for 0.5 seconds for dBm to settle
         self.move(UP, 2 * step_size)
+        time.sleep(0.5)  # wait for 0.5 seconds for dBm to settle
         self.move(DOWN, step_size)  # move back to start position
+        time.sleep(0.5)  # wait for 0.5 seconds for dBm to settle
 
     def get_max_position(self):
         """Return position of maximum power and read power"""
@@ -179,33 +184,33 @@ class CrossScan():
         prev_pos_y = pos_y
 
         while self.current_target_x != pos_x or self.current_target_y != pos_y:
+            self.lock.acquire()
             try:
-                self.lock.acquire()
                 if self.remote:
                     self.client.issue_remote_command("move_motors_to", (self.current_target_x, self.current_target_y))
                     print(f"Remote moving motors: {pos_x}, {pos_y}")
                 else:
                     self.client.move_motors_to(self.current_target_x, self.current_target_y)
                     print(f"Local moving motors: {pos_x}, {pos_y}")
-                self.lock.release()
 
-                self.lock.acquire()
                 if self.remote:
                     print(f"Remote motors position: {pos_x}, {pos_y}")
                     pos_x, pos_y = self.client.issue_remote_command("get_motors_position", ())
                 else:
                     pos_x, pos_y = self.client.get_motors_position()
                     print(f"Local motors position: {pos_x}, {pos_y}")
-                self.lock.release()
 
                 if pos_x == prev_pos_x and pos_y == prev_pos_y:
                     retry_count += 1
 
-                if retry_count > 15:  # break after 15 seconds
+                if retry_count > 60:  # break after 15 seconds
                     break
+                    
             except Exception as e:
                 self.lock.release()
                 log.error(e)
+
+            self.lock.release()
 
             time.sleep(1)  # sleep until motor moves to desired position
 
