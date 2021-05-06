@@ -73,9 +73,10 @@ class Align():
         self.running = False
         self.monitor_thread.join()
 
-    def move_to_max(self, unit):
+    def move_to_max(self, unit, rx_power_limit):
         """Move selected unit to max point"""
-        self.move_to_position(unit, self.max[unit]["x"], self.max[unit]["y"])
+        print(f'====== MOVING TO MAX {self.max[unit]["x"]}, {self.max[unit]["y"]} ON {unit} ======')
+        self.move_to_position(unit, self.max[unit]["x"], self.max[unit]["y"], rx_power_limit)
 
     def get_current_position(self, unit):
         """Get current position of unit"""
@@ -83,16 +84,16 @@ class Align():
         if unit == Unit.SECONDARY:
             current_x = self.current_state["secondary"]["x"]
             current_y = self.current_state["secondary"]["y"]
-            print(f"Remote motors position: {current_x}, {current_y}")
+            # print(f"Remote motors position: {current_x}, {current_y}")
         else:
             current_x = self.current_state["primary"]["x"]
             current_y = self.current_state["primary"]["y"]
-            print(f"Local motors position: {current_x}, {current_y}")
+            # print(f"Local motors position: {current_x}, {current_y}")
         self.lock.release()
 
         return current_x, current_y
 
-    def move_to_position(self, unit, target_x, target_y):
+    def move_to_position(self, unit, target_x, target_y, rx_power_limit):
         """Move motor to selected position"""
         print(f"Moving to selected position: {target_x}, {target_y}")
 
@@ -108,16 +109,39 @@ class Align():
             
             current_x, current_y = self.get_current_position(unit)
 
+            # break out if above desired rx power
+            current_rx_power = self.current_state[unit]["dBm"]
+            if current_rx_power > rx_power_limit:
+                # when breaking out make sure to stay at current position
+                try:
+                    self.lock.acquire()
+                    if unit == Unit.SECONDARY:
+                        self.controller.issue_remote_command("move_motors_to", (current_x, current_y))
+                        # print(f"Remote moving motors: {target_x}, {target_y}")
+                    else:
+                        self.controller.move_motors_to(current_x, current_y)
+                        # print(f"Local moving motors: {target_x}, {target_y}")
+                    command_time = time.time()
+                    self.lock.release()
+                except Exception as e:
+                    self.lock.release()
+                    log.error(e)
+                return
+
+            if target_x == -3750:  # NOTE HARDWARE BUG ON BOTH UNITS at -3750 motor gets stuckt at ~-3550
+                target_x = -4000
+
+            # print(f"Time: {time.time() - command_time}")
             if time.time() - command_time > RESEND_COMMAND_TIME:
                 try:
                     self.lock.acquire()
                     if unit == Unit.SECONDARY:
                         self.controller.issue_remote_command("move_motors_to", (target_x, target_y))
-                        command_time = time.time()
-                        print(f"Remote moving motors: {target_x}, {target_y}")
+                        # print(f"Remote moving motors: {target_x}, {target_y}")
                     else:
                         self.controller.move_motors_to(target_x, target_y)
-                        print(f"Local moving motors: {target_x}, {target_y}")
+                        # print(f"Local moving motors: {target_x}, {target_y}")
+                    command_time = time.time()
                     self.lock.release()
                 except Exception as e:
                     self.lock.release()
@@ -128,26 +152,27 @@ class Align():
             else:
                 retry_count = 0
 
-            if retry_count > 120:  # break after 60 seconds
+            if retry_count > 30:  # break after 60 seconds
+                print("TIMEOUT ON MOTOR MOVEMENT")
                 break
 
-            if retry_count > 30:  # 15 sec
-                # nudge motors if they stall for one reason or another
-                self.lock.acquire()
-                if unit == Unit.SECONDARY:
-                    self.controller.issue_remote_command("move_motors", (500, 500))
-                    print("Nudging remote motor")
-                else:
-                    self.controller.move_motors(500, 500)
-                    print("Nudging local motor")
-                self.lock.release()
+            # if retry_count > 10:  # 15 sec
+            #     # nudge motors if they stall for one reason or another
+            #     self.lock.acquire()
+            #     if unit == Unit.SECONDARY:
+            #         self.controller.issue_remote_command("move_motors", (500, 500))
+            #         print("Nudging remote motor")
+            #     else:
+            #         self.controller.move_motors(2000, 2000)
+            #         print("Nudging local motor")
+            #     self.lock.release()
 
             prev_pos_x = current_x
             prev_pos_y = current_y
 
             time.sleep(0.5)  # sleep until motor moves to desired position
 
-        print("END OF MOVE TO POSITION LOOP?")
+        # print("END OF MOVE TO POSITION LOOP?")
 
     def set_max_point_strategy(self, strategy):
         """Set desired max point selection strategy"""
@@ -237,6 +262,7 @@ class Align():
                     self._update_max_points()
                     
                 except Exception as e:
+                    self.lock.release()
                     log.error(f"Error getting rx_dBm: {e}")            
 
                 time.sleep(0.2)
