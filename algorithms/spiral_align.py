@@ -3,8 +3,7 @@ import time
 import logging
 from threading import Thread, Lock
 
-from ..src.align import Align, Unit
-from ..src.strategy import Strategy
+from ..src.align import Align, Unit, Strategy
 from ..src.heatmap import Heatmap
 
 # TODO read offset positions from file
@@ -24,12 +23,13 @@ class Direction():
 
 # READ THIS: https://realpython.com/python-interface/
 class SpiralAlign(Align):
-    def __init__(self, heatmap_primary, heatmap_secondary):
+    def __init__(self):
         """Init algorithm variables"""
         super().__init__()
 
-        self.heatmap_primary = heatmap_primary
-        self.heatmap_secondary = heatmap_secondary
+        # TODO implement proper heatmap functionality
+        # self.heatmap_primary = heatmap_primary
+        # self.heatmap_secondary = heatmap_secondary
 
         self.current_target = {
             "primary": None,
@@ -122,15 +122,17 @@ class SpiralAlign(Align):
     def align_alternatingly(self, rx_power_limit=0):
         """Align to each units max power"""
 
+        rx_power_limit = 3
+
         # 1. Start by homing
         self.move_to_position(Unit.PRIMARY, 0, 0, rx_power_limit)
         self.move_to_position(Unit.SECONDARY, 0, 0, rx_power_limit)
 
-        self.heatmap_primary.clear_heatmap()  # clear heatmap
-        self.heatmap_secondary.clear_heatmap()  # clear heatmap
+        # self.heatmap_primary.clear_heatmap()  # clear heatmap
+        # self.heatmap_secondary.clear_heatmap()  # clear heatmap
 
         # move both to max position
-        
+        rx_power_limit = 0
         self.move_to_max(Unit.PRIMARY, rx_power_limit)
         self.move_to_max(Unit.SECONDARY, rx_power_limit)
 
@@ -138,6 +140,9 @@ class SpiralAlign(Align):
         LOOP_COUNT_LIMIT = 5
         N = 4
         loop_count = 0
+        circle_count = 5
+        
+        max_found = False
 
         print("STARTING LOOP")
 
@@ -156,24 +161,27 @@ class SpiralAlign(Align):
 
             rx_power_limit = -3
             for _ in range(0, N):
+                
                 # reset max so we're not stuck on incorrect maxima
                 self.reset_maximum(Unit.PRIMARY)
                 self.reset_maximum(Unit.SECONDARY)
-                self.do_spiral(Unit.PRIMARY, step_size, stop_after=5, rx_power_limit=rx_power_limit)
+                self.do_spiral(Unit.PRIMARY, step_size, stop_after=circle_count, rx_power_limit=rx_power_limit)
                 self.move_to_max(Unit.PRIMARY, rx_power_limit)
                 # self.move_to_max(Unit.SECONDARY)
-                self.do_spiral(Unit.SECONDARY, step_size, stop_after=5, rx_power_limit=rx_power_limit)
+                self.do_spiral(Unit.SECONDARY, step_size, stop_after=circle_count, rx_power_limit=rx_power_limit)
                 # self.move_to_max(Unit.PRIMARY)
                 self.move_to_max(Unit.SECONDARY, rx_power_limit)
                 print(f"======= SPIRAL SCAN WITH STEP {step_size} FINISHED =======")
                 step_size = int(step_size * 0.75)
 
+                # if maxima is still -40 after first spiral do scan of whole motor range
+                if self.maximum["primary"]["dBm"] > -40 or self.maximum["secondary"]["dBm"] > -40:
+                    max_found = True
+
+                if not max_found:
+                    circle_count = 11  # do spiral on whole range
+
+                else:
+                    circle_count = 5
+
             loop_count += 1
-
-
-# create heatmaps
-heatmap_primary = Heatmap(offset_x_master, offset_y_master)
-heatmap_secondary = Heatmap(offset_x_slave, offset_y_slave)
-
-spiral_align = SpiralAlign(heatmap_primary, heatmap_secondary)
-spiral_align.align_alternatingly()
