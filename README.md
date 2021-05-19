@@ -3,6 +3,8 @@
 ## Description
 The goal of KORUZA v2 Pro Tracking is to implement and provide a easy to use Alignment interface written in Python. Using this interface integrators and KORUZA v2 Pro users can write, test and deploy their own Auto Alignment and Tracking algorithms.
 
+General documentation about the alignment engine can be found [here](https://docs.koruza.net/software/alignment-engine).
+
 The Alignment interface provides full control over both units with the following actions:
 * move selected unit to desired position
 * move selected unit to it's maximum
