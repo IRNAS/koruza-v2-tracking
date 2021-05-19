@@ -16,7 +16,12 @@ For Automatic Alignment and Tracking to work units have to be configured accordi
 ## Algorithms
 The goal of alignment algorithms is to align both KORUZA v2 Pro units in a position where the strength of the received optical signal is maximized on both units. This can be done in various ways, applying different algorithms.
 
-We have currently implemented a Spiral Scan Align Algorithm. More Auto Alignment Algorithms and Tracking techniques are planned to release in the future.
+We have currently implemented a Spiral Scan Align Algorithm. More Auto Alignment Algorithms and Tracking techniques are planned to be released in the future.
+
+## Guide to Implementation
+_Coming soon..._
+
+This section will include all relevant instructions on how a user must implement their own algorithm such that it is compatible with the alignment engine and other KORUZA sotware packages.
 
 ## License
 Firmware and software originating from KORUZA v2 Pro project, including KORUZA v2 Pro Tracking, is licensed under [GNU General Public License v3.0](https://github.com/IRNAS/koruza-v2-tracking/blob/master/LICENSE).
