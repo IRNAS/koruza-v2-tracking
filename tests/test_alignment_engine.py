@@ -1,7 +1,8 @@
 import time
 import xmlrpc.client
 
-IP = "localhost"
+# IP = "localhost"
+IP = "192.168.76.118"
 ALIGNMENT_ENGINE_PORT = 8002
 
 def save_picture(filename, content):
