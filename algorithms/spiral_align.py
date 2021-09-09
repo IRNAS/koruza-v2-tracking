@@ -37,11 +37,10 @@ class SpiralAlign(Align):
         }
 
         self.set_max_point_strategy(Strategy.LOCAL_MAX)
-        self.start_monitoring()
 
     def __del__(self):
         """Destructor"""
-        pass
+        self.stop_monitoring()
 
     def next_step(self, unit, direction_enum, step, rx_power_limit):
         """Move in horizontal/vertical direction"""
@@ -122,6 +121,8 @@ class SpiralAlign(Align):
     def align_alternatingly(self, rx_power_limit=0):
         """Align to each units max power"""
 
+        self.start_monitoring()
+
         rx_power_limit = 3
 
         # 1. Start by homing
@@ -185,3 +186,5 @@ class SpiralAlign(Align):
                     circle_count = 5
 
             loop_count += 1
+
+        self.stop_monitoring()

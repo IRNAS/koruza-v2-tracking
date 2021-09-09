@@ -71,6 +71,7 @@ class Align():
         """Destructor"""
         self.running = False
         self.monitor_thread.join()
+        self.monitor_thread = None
 
     def reset_maximum(self, unit):
         """Reset both maxima"""
@@ -194,6 +195,10 @@ class Align():
         self.monitor_thread = Thread(target=self._get_unit_diagnostics, daemon=True)
         self.monitor_thread.start()
 
+    def stop_monitoring(self):
+        """Stop monitoring thread"""
+        self.running = None
+
     # TODO move to separate class
     def _strategy_local_maxima(self):
         """Update the maximum position on each unit, regardless of the position of the other unit"""
@@ -269,3 +274,6 @@ class Align():
 
             elif self.running == False:
                 break
+            
+            elif self.running is None:
+                pass
