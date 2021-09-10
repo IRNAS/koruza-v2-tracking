@@ -3,7 +3,7 @@ import time
 import logging
 from threading import Thread, Lock
 
-from ..src.align import Align, Strategy
+from .align import Align, Strategy
 from ..src.heatmap import Heatmap
 
 # TODO read offset positions from file
@@ -120,6 +120,10 @@ class SpiralAlign(Align):
 
     def align_alternatingly(self, rx_power_limit=0):
         """Align to each units max power"""
+
+        if self.primary is None or self.secondary is None:
+            print("Unable to read data from one/both of the units, exiting")
+            return
 
         self.start_monitoring()
 

@@ -60,8 +60,14 @@ class Align():
             }  
         }
         
+        # NOTE: error handling of such instantiation has to be done by the user
         self.alignment_engine_proxy = xmlrpc.client.ServerProxy(f"http://{IP}:{ALIGNMENT_ENGINE_PORT}", allow_none=True)  # create client proxy to alignment engine
-        self.primary, self.secondary = self.alignment_engine_proxy.initialize()
+        try:
+            self.primary, self.secondary = self.alignment_engine_proxy.initialize()
+        except Exception as e:
+            print(f"Failed to initialize connection to alignment engine: {e}")
+            self.primary = None
+            self.secodnary = None
 
         time.sleep(2)  # wait for client to init
 
@@ -221,25 +227,15 @@ class Align():
         while True:
             if self.running:
                 try:
-                    self.lock.acquire()
-                    self.current_state[self.secondary]["x"], self.current_state[self.secondary]["y"] = self.alignment_engine_proxy.read_motor_position(self.secondary)
-                    self.lock.release()
+                    for unit in (self.primary, self.secondary):
+                        self.lock.acquire()
+                        self.current_state[unit]["x"], self.current_state[unit]["y"] = self.alignment_engine_proxy.read_motor_position(unit)
+                        self.lock.release()
 
-                    self.lock.acquire()
-                    self.current_state[self.secondary]["dBm"] = self.alignment_engine_proxy.read_sfp_data(self.secondary).get("sfp_0", {}).get("diagnostics", {}).get("rx_power_dBm", -40)
-                    self.lock.release()
+                        self.lock.acquire()
+                        self.current_state[unit]["dBm"] = self.alignment_engine_proxy.read_sfp_data(unit).get("sfp_0", {}).get("diagnostics", {}).get("rx_power_dBm", -40)
+                        self.lock.release()
 
-                    self.lock.acquire()
-                    self.current_state[self.primary]["x"], self.current_state[self.primary]["y"] = self.alignment_engine_proxy.read_motor_position(self.primary)
-                    self.lock.release()
-                    
-                    self.lock.acquire()
-                    self.current_state[self.primary]["dBm"] = self.alignment_engine_proxy.read_sfp_data(self.primary).get("sfp_0", {}).get("diagnostics", {}).get("rx_power_dBm", -40)
-                    self.lock.release()
-
-                    # print(f"Updated current state: {self.current_state}")
-
-                    # update maximums
                     self._update_max_points()
                     
                 except Exception as e:

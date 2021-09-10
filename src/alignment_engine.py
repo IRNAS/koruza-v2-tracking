@@ -60,9 +60,16 @@ class AlignmentEngine():
         if unit == Unit.SECONDARY:
             picture = self._koruza_proxy.issue_remote_command("take_picture", ())
         else:
-            start_time = time.time()
             picture = self._koruza_proxy.take_picture()
-            print(f"Duration of image capture with compression: {time.time() - start_time}")  # 77 seconds in case of raw byte data in list -> double that cause we have 2 rpc calls in between
 
         # print(f"Received picture: {picture}")
         return picture
+
+    def get_calibration(self, unit):
+        """Get calibration data of specified unit - useful when aligning calibrated cross to other unit's camera"""
+        if unit == Unit.SECONDARY:
+            calibration = self._koruza_proxy.issue_remote_command("get_calibration", ())
+        else:
+            calibration = self._koruza_proxy.get_calibration()
+
+        return calibration
