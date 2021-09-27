@@ -40,7 +40,11 @@ class AlignmentEngine():
     def read_motor_position(self, unit):
         """Read motor position of specified unit"""
         if unit == Unit.SECONDARY:
-            x, y = self._koruza_proxy.issue_remote_command("get_motors_position", ())
+            ret = self._koruza_proxy.issue_remote_command("get_motors_position", ())
+            if ret is not None:
+                x, y = ret
+            else:
+                x, y = None, None
         else:
             x, y = self._koruza_proxy.get_motors_position()
 

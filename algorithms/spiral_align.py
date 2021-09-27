@@ -4,7 +4,6 @@ import logging
 from threading import Thread, Lock
 
 from .align import Align, Strategy
-from ..src.heatmap import Heatmap
 
 # TODO read offset positions from file
 offset_x_master = 282
