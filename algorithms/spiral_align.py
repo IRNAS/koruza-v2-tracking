@@ -3,8 +3,7 @@ import time
 import logging
 from threading import Thread, Lock
 
-from ..src.align import Align, Unit, Strategy
-from ..src.heatmap import Heatmap
+from .align import Align, Strategy
 
 # TODO read offset positions from file
 offset_x_master = 282
@@ -37,11 +36,10 @@ class SpiralAlign(Align):
         }
 
         self.set_max_point_strategy(Strategy.LOCAL_MAX)
-        self.start_monitoring()
 
     def __del__(self):
         """Destructor"""
-        pass
+        self.stop_monitoring()
 
     def next_step(self, unit, direction_enum, step, rx_power_limit):
         """Move in horizontal/vertical direction"""
@@ -122,19 +120,25 @@ class SpiralAlign(Align):
     def align_alternatingly(self, rx_power_limit=0):
         """Align to each units max power"""
 
+        if self.primary is None or self.secondary is None:
+            print("Unable to read data from one/both of the units, exiting")
+            return
+
+        self.start_monitoring()
+
         rx_power_limit = 3
 
         # 1. Start by homing
-        self.move_to_position(Unit.PRIMARY, 0, 0, rx_power_limit)
-        self.move_to_position(Unit.SECONDARY, 0, 0, rx_power_limit)
+        self.move_to_position(self.primary, 0, 0, rx_power_limit)
+        self.move_to_position(self.secondary, 0, 0, rx_power_limit)
 
         # self.heatmap_primary.clear_heatmap()  # clear heatmap
         # self.heatmap_secondary.clear_heatmap()  # clear heatmap
 
         # move both to max position
         rx_power_limit = 0
-        self.move_to_max(Unit.PRIMARY, rx_power_limit)
-        self.move_to_max(Unit.SECONDARY, rx_power_limit)
+        self.move_to_max(self.primary, rx_power_limit)
+        self.move_to_max(self.secondary, rx_power_limit)
 
         # 2. repeat steps until limit is reached or signal strength is satisfactory
         LOOP_COUNT_LIMIT = 5
@@ -146,36 +150,36 @@ class SpiralAlign(Align):
 
         print("STARTING LOOP")
 
-        while (self.current_state["primary"]["dBm"] < rx_power_limit and self.current_state["secondary"]["dBm"] < rx_power_limit) and loop_count < LOOP_COUNT_LIMIT:
+        while (self.current_state[self.primary]["dBm"] < rx_power_limit and self.current_state[self.secondary]["dBm"] < rx_power_limit) and loop_count < LOOP_COUNT_LIMIT:
 
             step_size = 1000
 
-            if self.current_state["primary"]["dBm"] > -20 or self.current_state["secondary"]["dBm"] > -20:
+            if self.current_state[self.primary]["dBm"] > -20 or self.current_state[self.secondary]["dBm"] > -20:
                 step_size = 1000
 
-            if self.current_state["primary"]["dBm"] > -15 or self.current_state["secondary"]["dBm"] > -15:
+            if self.current_state[self.primary]["dBm"] > -15 or self.current_state[self.secondary]["dBm"] > -15:
                 step_size = 500
 
-            if self.current_state["primary"]["dBm"] > -10 or self.current_state["secondary"]["dBm"] > -10:
+            if self.current_state[self.primary]["dBm"] > -10 or self.current_state[self.secondary]["dBm"] > -10:
                 step_size = 250
 
             rx_power_limit = -3
             for _ in range(0, N):
                 
                 # reset max so we're not stuck on incorrect maxima
-                self.reset_maximum(Unit.PRIMARY)
-                self.reset_maximum(Unit.SECONDARY)
-                self.do_spiral(Unit.PRIMARY, step_size, stop_after=circle_count, rx_power_limit=rx_power_limit)
-                self.move_to_max(Unit.PRIMARY, rx_power_limit)
-                # self.move_to_max(Unit.SECONDARY)
-                self.do_spiral(Unit.SECONDARY, step_size, stop_after=circle_count, rx_power_limit=rx_power_limit)
-                # self.move_to_max(Unit.PRIMARY)
-                self.move_to_max(Unit.SECONDARY, rx_power_limit)
+                self.reset_maximum(self.primary)
+                self.reset_maximum(self.secondary)
+                self.do_spiral(self.primary, step_size, stop_after=circle_count, rx_power_limit=rx_power_limit)
+                self.move_to_max(self.primary, rx_power_limit)
+                # self.move_to_max(self.secondary)
+                self.do_spiral(self.secondary, step_size, stop_after=circle_count, rx_power_limit=rx_power_limit)
+                # self.move_to_max(self.primary)
+                self.move_to_max(self.secondary, rx_power_limit)
                 print(f"======= SPIRAL SCAN WITH STEP {step_size} FINISHED =======")
                 step_size = int(step_size * 0.75)
 
                 # if maxima is still -40 after first spiral do scan of whole motor range
-                if self.maximum["primary"]["dBm"] > -40 or self.maximum["secondary"]["dBm"] > -40:
+                if self.maximum[self.primary]["dBm"] > -40 or self.maximum[self.secondary]["dBm"] > -40:
                     max_found = True
 
                 if not max_found:
@@ -185,3 +189,5 @@ class SpiralAlign(Align):
                     circle_count = 5
 
             loop_count += 1
+
+        self.stop_monitoring()

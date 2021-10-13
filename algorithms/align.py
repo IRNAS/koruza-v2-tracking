@@ -3,7 +3,8 @@ import time
 import logging
 from threading import Thread, Lock
 
-from ...src.constants import KORUZA_MAIN_PORT, DEVICE_MANAGEMENT_PORT, RESEND_COMMAND_TIME
+from ...src.constants import ALIGNMENT_ENGINE_PORT
+from ..src.alignment_engine import AlignmentEngine
 """
 Base Align class used in alignment algorithms
 
@@ -16,14 +17,14 @@ Implements common methods used:
 """
 
 log = logging.getLogger()
+
 class Strategy():
     LOCAL_MAX = 1
     GLOBAL_MAX = 2
     MAX_SUM = 3
 
-class Unit():
-    PRIMARY = "primary"
-    SECONDARY = "secondary"
+IP = "localhost"  # KORUZA IP or localhost - if running on local machine use KORUZA IP
+RESEND_COMMAND_TIME = 2
 
 class Align():
     def __init__(self):
@@ -59,7 +60,15 @@ class Align():
             }  
         }
         
-        self._controller = xmlrpc.client.ServerProxy(f"http://localhost:{KORUZA_MAIN_PORT}", allow_none=True)  # client to koruza
+        # NOTE: error handling of such instantiation has to be done by the user
+        self.alignment_engine_proxy = xmlrpc.client.ServerProxy(f"http://{IP}:{ALIGNMENT_ENGINE_PORT}", allow_none=True)  # create client proxy to alignment engine
+        try:
+            self.primary, self.secondary = self.alignment_engine_proxy.initialize()
+        except Exception as e:
+            print(f"Failed to initialize connection to alignment engine: {e}")
+            self.primary = None
+            self.secodnary = None
+
         time.sleep(2)  # wait for client to init
 
         self.maximum_point_strategy = None
@@ -71,6 +80,7 @@ class Align():
         """Destructor"""
         self.running = False
         self.monitor_thread.join()
+        self.monitor_thread = None
 
     def reset_maximum(self, unit):
         """Reset both maxima"""
@@ -86,13 +96,8 @@ class Align():
     def get_current_position(self, unit):
         """Get current position of unit"""
         self.lock.acquire()        
-        if unit == Unit.SECONDARY:
-            current_x = self.current_state["secondary"]["x"]
-            current_y = self.current_state["secondary"]["y"]
-            # print(f"Remote motors position: {current_x}, {current_y}")
-        else:
-            current_x = self.current_state["primary"]["x"]
-            current_y = self.current_state["primary"]["y"]
+        current_x = self.current_state[unit]["x"]
+        current_y = self.current_state[unit]["y"]
             # print(f"Local motors position: {current_x}, {current_y}")
         self.lock.release()
 
@@ -120,12 +125,7 @@ class Align():
                 # when breaking out make sure to stay at current position
                 try:
                     self.lock.acquire()
-                    if unit == Unit.SECONDARY:
-                        self._controller.issue_remote_command("move_motors_to", (current_x, current_y))
-                        # print(f"Remote moving motors: {target_x}, {target_y}")
-                    else:
-                        self._controller.move_motors_to(current_x, current_y)
-                        # print(f"Local moving motors: {target_x}, {target_y}")
+                    self.alignment_engine_proxy.move_motor(unit, target_x, target_y)
                     command_time = time.time()
                     self.lock.release()
                 except Exception as e:
@@ -136,16 +136,10 @@ class Align():
             if target_x == -3750:  # NOTE HARDWARE BUG ON BOTH UNITS at -3750 motor gets stuckt at ~-3550
                 target_x = -4000
 
-            # print(f"Time: {time.time() - command_time}")
             if time.time() - command_time > RESEND_COMMAND_TIME:
                 try:
                     self.lock.acquire()
-                    if unit == Unit.SECONDARY:
-                        self._controller.issue_remote_command("move_motors_to", (target_x, target_y))
-                        # print(f"Remote moving motors: {target_x}, {target_y}")
-                    else:
-                        self._controller.move_motors_to(target_x, target_y)
-                        # print(f"Local moving motors: {target_x}, {target_y}")
+                    self.alignment_engine_proxy.move_motor(unit, target_x, target_y)
                     command_time = time.time()
                     self.lock.release()
                 except Exception as e:
@@ -160,17 +154,6 @@ class Align():
             if retry_count > 30:  # break after 60 seconds
                 print("TIMEOUT ON MOTOR MOVEMENT")
                 break
-
-            # if retry_count > 10:  # 15 sec
-            #     # nudge motors if they stall for one reason or another
-            #     self.lock.acquire()
-            #     if unit == Unit.SECONDARY:
-            #         self._controller.issue_remote_command("move_motors", (500, 500))
-            #         print("Nudging remote motor")
-            #     else:
-            #         self._controller.move_motors(2000, 2000)
-            #         print("Nudging local motor")
-            #     self.lock.release()
 
             prev_pos_x = current_x
             prev_pos_y = current_y
@@ -194,41 +177,45 @@ class Align():
         self.monitor_thread = Thread(target=self._get_unit_diagnostics, daemon=True)
         self.monitor_thread.start()
 
+    def stop_monitoring(self):
+        """Stop monitoring thread"""
+        self.running = None
+
     # TODO move to separate class
     def _strategy_local_maxima(self):
         """Update the maximum position on each unit, regardless of the position of the other unit"""
 
-        if self.current_state["primary"]["dBm"] > self.maximum["primary"]["dBm"]:
-            self.maximum["primary"] = self.current_state["primary"].copy()
-            print(f'New max point on primary unit: {self.maximum["primary"]}')
+        if self.current_state[self.primary]["dBm"] > self.maximum[self.primary]["dBm"]:
+            self.maximum[self.primary] = self.current_state[self.primary].copy()
+            print(f'New max point on primary unit: {self.maximum[self.primary]}')
 
-        if self.current_state["secondary"]["dBm"] > self.maximum["secondary"]["dBm"]:
-            self.maximum["secondary"] = self.current_state["secondary"].copy()
-            print(f'New max point on secondary unit: {self.maximum["secondary"]}')
+        if self.current_state[self.secondary]["dBm"] > self.maximum[self.secondary]["dBm"]:
+            self.maximum[self.secondary] = self.current_state[self.secondary].copy()
+            print(f'New max point on secondary unit: {self.maximum[self.secondary]}')
 
     def _strategy_global_maximum(self):
         """Update position of maxima on both units if a global maximum is found"""
-        if self.current_state["secondary"]["dBm"] > self.maximum_dBm or self.current_state["primary"]["dBm"] > self.maximum_dBm:
+        if self.current_state[self.secondary]["dBm"] > self.maximum_dBm or self.current_state[self.primary]["dBm"] > self.maximum_dBm:
 
-            self.maximum["secondary"] = self.current_state["secondary"].copy()
-            print(f'New max point on secondary unit: {self.maximum["secondary"]}')
+            self.maximum[self.secondary] = self.current_state[self.secondary].copy()
+            print(f'New max point on secondary unit: {self.maximum[self.secondary]}')
 
-            self.maximum["primary"] = self.current_state["primary"].copy()
-            print(f'New max point on primary unit: {self.maximum["primary"]}')
+            self.maximum[self.primary] = self.current_state[self.primary].copy()
+            print(f'New max point on primary unit: {self.maximum[self.primary]}')
 
-            self.maximum_dBm = self.maximum["primary"]["dBm"].copy() if self.maximum["primary"]["dBm"] > self.maximum["secondary"]["dBm"] else self.maximum["secondary"]["dBm"].copy()
+            self.maximum_dBm = self.maximum[self.primary]["dBm"].copy() if self.maximum[self.primary]["dBm"] > self.maximum[self.secondary]["dBm"] else self.maximum[self.secondary]["dBm"].copy()
             print(f"New total max dBm: {self.maximum_dBm}")
 
     def _strategy_maximum_sum(self):
         """Update position of maxima on both units when sum of signal strength is at new maximum"""
 
         # update max points if total dBm is higher than previously
-        if self.current_state["primary"]["dBm"] + self.current_state["secondary"]["dBm"] > self.maximum["primary"]["dBm"] + self.maximum["secondary"]["dBm"]:
-            self.maximum["secondary"] = self.current_state["secondary"].copy()
-            print(f'New max point on secondary unit: {self.maximum["secondary"]}')
+        if self.current_state[self.primary]["dBm"] + self.current_state[self.secondary]["dBm"] > self.maximum[self.primary]["dBm"] + self.maximum[self.secondary]["dBm"]:
+            self.maximum[self.secondary] = self.current_state[self.secondary].copy()
+            print(f'New max point on secondary unit: {self.maximum[self.secondary]}')
 
-            self.maximum["primary"] = self.current_state["primary"].copy()
-            print(f'New max point on primary unit: {self.maximum["primary"]}')
+            self.maximum[self.primary] = self.current_state[self.primary].copy()
+            print(f'New max point on primary unit: {self.maximum[self.primary]}')
   
     def _update_max_points(self):
         """Call set function to update max points"""
@@ -240,25 +227,15 @@ class Align():
         while True:
             if self.running:
                 try:
-                    self.lock.acquire()
-                    self.current_state["secondary"]["x"], self.current_state["secondary"]["y"] = self._controller.issue_remote_command("get_motors_position", ())
-                    self.lock.release()
+                    for unit in (self.primary, self.secondary):
+                        self.lock.acquire()
+                        self.current_state[unit]["x"], self.current_state[unit]["y"] = self.alignment_engine_proxy.read_motor_position(unit)
+                        self.lock.release()
 
-                    self.lock.acquire()
-                    self.current_state["secondary"]["dBm"] = self._controller.issue_remote_command("get_sfp_diagnostics", ())["sfp_0"]["diagnostics"]["rx_power_dBm"]
-                    self.lock.release()
+                        self.lock.acquire()
+                        self.current_state[unit]["dBm"] = self.alignment_engine_proxy.read_sfp_data(unit).get("sfp_0", {}).get("diagnostics", {}).get("rx_power_dBm", -40)
+                        self.lock.release()
 
-                    self.lock.acquire()
-                    self.current_state["primary"]["x"], self.current_state["primary"]["y"] = self._controller.get_motors_position()
-                    self.lock.release()
-                    
-                    self.lock.acquire()
-                    self.current_state["primary"]["dBm"] = self._controller.get_sfp_diagnostics()["sfp_0"]["diagnostics"]["rx_power_dBm"]
-                    self.lock.release()
-
-                    # print(f"Updated current state: {self.current_state}")
-
-                    # update maximums
                     self._update_max_points()
                     
                 except Exception as e:
@@ -269,3 +246,6 @@ class Align():
 
             elif self.running == False:
                 break
+            
+            elif self.running is None:
+                pass

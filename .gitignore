@@ -2,3 +2,6 @@ __pycache__/*
 */__pycache__/*
 images/*
 config.json
+*.jpg
+package-lock.json
+node_modules/*
