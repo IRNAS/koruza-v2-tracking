@@ -1,17 +1,17 @@
 # koruza-v2-tracking
 
 ## Description
-The goal of KORUZA v2 Pro Tracking is to implement and provide a easy to use Alignment interface written in Python. Using this interface integrators and KORUZA v2 Pro users can write, test and deploy their own Auto Alignment and Tracking algorithms.
+The goal of KORUZA v2 Pro Tracking is to implement and provide an easy to use Alignment interface written in Python. Using this interface integrators and KORUZA v2 Pro users can write, test and deploy their own Auto Alignment and Tracking algorithms.
 
 General documentation about the alignment engine can be found [here](https://docs.koruza.net/software/alignment-engine).
 
-The Alignment interface provides full control over both units with the following actions:
-* move selected unit to desired position
-* move selected unit to it's maximum
-* get current position of selected unit
-* set strategy for maxima selection
-* reset maximum of selected unit
-* start reading data from both units
+The `alignment_engine.py` provides full control over both units with the following actions:
+* initialize - returns handle to primary and secondary unit
+* move_motor - move motor of selected unit
+* read_motor_position - read motor position of selected unit
+* read_sfp_data - read sfp data of selected unit
+* get_picture - get picture of selected unit
+* get_calibration - get calibration of selected unit
 
 For Automatic Alignment and Tracking to work units have to be configured according to the `config.json` file described in the [device management](https://github.com/IRNAS/koruza-v2-device-management) repository.
 
