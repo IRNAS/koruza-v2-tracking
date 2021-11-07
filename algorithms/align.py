@@ -4,7 +4,6 @@ import logging
 from threading import Thread, Lock
 
 from ...src.constants import ALIGNMENT_ENGINE_PORT
-from ..src.alignment_engine import AlignmentEngine
 """
 Base Align class used in alignment algorithms
 

@@ -77,3 +77,12 @@ class AlignmentEngine():
             calibration = self._koruza_proxy.get_calibration()
 
         return calibration
+
+    def set_zoom_level(self, unit, zoom_level):
+        """Change zoom level on specified unit"""
+        if unit == Unit.SECONDARY:
+            marker_x, marker_y = self._koruza_proxy.issue_remote_command("set_zoom_level", (zoom_level, ))
+        else:
+            marker_x, marker_y = self._koruza_proxy.set_zoom_level(zoom_level)
+
+        return marker_x, marker_y
